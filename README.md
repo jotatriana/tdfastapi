@@ -19,7 +19,7 @@ A Flask-based web application for exploring and managing Talkdesk APIs, with spe
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/jotatriana/tdfastapi.git
 cd tdfastapi
 
 # Create virtual environment
@@ -32,13 +32,16 @@ pip install flask python-dotenv pyyaml requests
 
 ### Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (see `.env.sample`):
 
 ```env
 TALKDESK_CLIENT_ID=your_client_id
 TALKDESK_CLIENT_SECRET=your_client_secret
+TALKDESK_ACCOUNT_NAME=your_account_name
 TALKDESK_SCOPES=account:read users:read prompts:read prompts:write
 ```
+
+The `TALKDESK_ACCOUNT_NAME` is your Talkdesk subdomain prefix (e.g., `mycompany` for `mycompany.talkdeskid.com`).
 
 ### Running the Application
 
@@ -145,7 +148,7 @@ tdfastapi/
 
 The application uses OAuth2 client credentials grant:
 
-1. Authenticates against `https://my70ypxx.talkdeskid.com/oauth/token`
+1. Authenticates against `https://{account_name}.talkdeskid.com/oauth/token` (configured via `TALKDESK_ACCOUNT_NAME`)
 2. Uses `https://api.talkdeskapp.com` for all API calls
 3. Automatically refreshes tokens as needed
 

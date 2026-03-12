@@ -23,7 +23,7 @@ Reusable API client classes that can be imported by both the Flask app and CLI s
 - Handles OAuth2 client credentials authentication against Talkdesk ID server
 - Dynamically parses OpenAPI spec to discover available endpoints
 - Manages dual base URLs:
-  - `https://my70ypxx.talkdeskid.com` for authentication (`/oauth/token`)
+  - `https://{account_name}.talkdeskid.com` for authentication (`/oauth/token`) - configured via `TALKDESK_ACCOUNT_NAME` env var
   - `https://api.talkdeskapp.com` for all other API calls
 - Supports GET, POST, PATCH, and DELETE methods
 - Extracts path parameters from endpoint paths using regex
@@ -63,7 +63,7 @@ Reusable API client classes that can be imported by both the Flask app and CLI s
 
 The client uses OAuth2 client credentials grant:
 1. Base64-encodes `CLIENT_ID:CLIENT_SECRET`
-2. POSTs to `https://my70ypxx.talkdeskid.com/oauth/token` with Basic auth
+2. POSTs to `https://{account_name}.talkdeskid.com/oauth/token` with Basic auth (account name from `TALKDESK_ACCOUNT_NAME` env var)
 3. Caches access token for subsequent API requests
 4. Auto-authenticates before any API call (except auth endpoint itself)
 
@@ -90,6 +90,7 @@ The application uses a custom design system with CSS variables for theming. Key 
 Set these in a `.env` file (already gitignored):
 - `TALKDESK_CLIENT_ID` - Your Talkdesk OAuth client ID
 - `TALKDESK_CLIENT_SECRET` - Your Talkdesk OAuth client secret
+- `TALKDESK_ACCOUNT_NAME` - Your Talkdesk account name (subdomain prefix, e.g., `mycompany` for `mycompany.talkdeskid.com`)
 - `TALKDESK_SCOPES` - OAuth scopes (default: `account:read users:read`)
 
 ### Python Version
