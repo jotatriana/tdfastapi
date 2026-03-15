@@ -236,6 +236,40 @@ def prompts_admin():
                 background: rgba(255,255,255,0.25);
             }
 
+            /* Token Status */
+            .token-status {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: var(--spacing-2) var(--spacing-4);
+                background: rgba(255,255,255,0.1);
+                border-radius: var(--radius-lg);
+                font-size: var(--font-size-sm);
+                cursor: pointer;
+                transition: background var(--duration-fast) var(--ease-out);
+            }
+            .token-status:hover {
+                background: rgba(255,255,255,0.2);
+            }
+            .token-indicator {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--color-grey-500);
+            }
+            .token-indicator.valid {
+                background: var(--color-success);
+                box-shadow: 0 0 8px var(--color-success);
+            }
+            .token-indicator.expired {
+                background: var(--color-error);
+                box-shadow: 0 0 8px var(--color-error);
+            }
+            .token-indicator.warning {
+                background: var(--color-warning);
+                box-shadow: 0 0 8px var(--color-warning);
+            }
+
             /* Container */
             .container {
                 max-width: 1400px;
@@ -726,7 +760,13 @@ def prompts_admin():
                     <h1>Prompts Administration</h1>
                     <p>Manage your Contact Center audio prompts</p>
                 </div>
-                <a href="/" class="header-link">API Explorer</a>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <div id="token-status" class="token-status" onclick="showTokenModal()">
+                        <span class="token-indicator" id="token-indicator"></span>
+                        <span id="token-text">Checking...</span>
+                    </div>
+                    <a href="/" class="header-link">API Explorer</a>
+                </div>
             </div>
         </div>
 
@@ -764,6 +804,25 @@ def prompts_admin():
                 <div class="loading">
                     <div class="spinner"></div>
                     <p>Loading prompts...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token Status Modal -->
+        <div id="token-modal" class="modal">
+            <div class="modal-content" style="max-width: 450px;">
+                <div class="modal-header">
+                    <h2>Authentication Token Status</h2>
+                    <button class="close-btn" onclick="closeTokenModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="token-details" style="font-size: 0.9rem;">
+                        <p>Loading token status...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeTokenModal()">Close</button>
+                    <button class="btn btn-primary" onclick="refreshToken()">Refresh Token</button>
                 </div>
             </div>
         </div>
@@ -873,8 +932,106 @@ def prompts_admin():
             let bulkFiles = [];
             let bulkUploadInProgress = false;
 
-            // Load prompts on page load
-            document.addEventListener('DOMContentLoaded', loadPrompts);
+            // Load prompts on page load and check token status
+            document.addEventListener('DOMContentLoaded', () => {
+                loadPrompts();
+                checkTokenStatus();
+                // Check token status every 60 seconds
+                setInterval(checkTokenStatus, 60000);
+            });
+
+            // Token status functions
+            async function checkTokenStatus() {
+                try {
+                    const res = await fetch('/api/token/status');
+                    const status = await res.json();
+                    updateTokenIndicator(status);
+                } catch (e) {
+                    updateTokenIndicator({ valid: false, message: 'Unable to check token status' });
+                }
+            }
+
+            function updateTokenIndicator(status) {
+                const indicator = document.getElementById('token-indicator');
+                const text = document.getElementById('token-text');
+
+                if (!status.has_token) {
+                    indicator.className = 'token-indicator';
+                    text.textContent = 'No Token';
+                } else if (status.valid) {
+                    indicator.className = 'token-indicator valid';
+                    const mins = Math.floor(status.time_remaining_seconds / 60);
+                    text.textContent = mins > 60 ? `Valid (${Math.floor(mins/60)}h ${mins%60}m)` : `Valid (${mins}m)`;
+                } else {
+                    indicator.className = 'token-indicator expired';
+                    text.textContent = 'Expired';
+                }
+            }
+
+            function showTokenModal() {
+                document.getElementById('token-modal').classList.add('active');
+                loadTokenDetails();
+            }
+
+            function closeTokenModal() {
+                document.getElementById('token-modal').classList.remove('active');
+            }
+
+            async function loadTokenDetails() {
+                const detailsDiv = document.getElementById('token-details');
+                try {
+                    const res = await fetch('/api/token/status');
+                    const status = await res.json();
+
+                    let html = '<div style="line-height: 1.8;">';
+                    html += `<p><strong>Status:</strong> <span style="color: ${status.valid ? 'var(--color-success)' : 'var(--color-error)'};">${status.valid ? 'Valid' : 'Invalid/Expired'}</span></p>`;
+                    html += `<p><strong>Has Token:</strong> ${status.has_token ? 'Yes' : 'No'}</p>`;
+
+                    if (status.has_token && status.obtained_at) {
+                        const obtained = new Date(status.obtained_at * 1000);
+                        const expires = new Date(status.expires_at * 1000);
+                        html += `<p><strong>Obtained At:</strong> ${obtained.toLocaleString()}</p>`;
+                        html += `<p><strong>Expires At:</strong> ${expires.toLocaleString()}</p>`;
+                        html += `<p><strong>Time Remaining:</strong> ${formatTimeRemaining(status.time_remaining_seconds)}</p>`;
+                    }
+
+                    html += `<p><strong>Message:</strong> ${status.message}</p>`;
+                    html += '</div>';
+                    detailsDiv.innerHTML = html;
+                } catch (e) {
+                    detailsDiv.innerHTML = '<p style="color: var(--color-error);">Failed to load token status</p>';
+                }
+            }
+
+            function formatTimeRemaining(seconds) {
+                if (seconds <= 0) return 'Expired';
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+                if (mins > 0) return `${mins}m ${secs}s`;
+                return `${secs}s`;
+            }
+
+            async function refreshToken() {
+                const detailsDiv = document.getElementById('token-details');
+                detailsDiv.innerHTML = '<p>Refreshing token...</p>';
+
+                try {
+                    const res = await fetch('/api/token/refresh', { method: 'POST' });
+                    const result = await res.json();
+
+                    if (result.success) {
+                        detailsDiv.innerHTML = '<p style="color: var(--color-success);">Token refreshed successfully!</p>';
+                        checkTokenStatus();
+                        setTimeout(loadTokenDetails, 1000);
+                    } else {
+                        detailsDiv.innerHTML = `<p style="color: var(--color-error);">Failed to refresh token: ${result.message}</p>`;
+                    }
+                } catch (e) {
+                    detailsDiv.innerHTML = '<p style="color: var(--color-error);">Error refreshing token</p>';
+                }
+            }
 
             // Search functionality
             document.getElementById('search-input').addEventListener('input', filterPrompts);
@@ -1657,6 +1814,120 @@ def index():
                 display: inline-block;
             }
 
+            /* Token Status */
+            .token-status {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: var(--spacing-2) var(--spacing-4);
+                background: rgba(255,255,255,0.1);
+                border-radius: var(--radius-lg);
+                font-size: var(--font-size-sm);
+                cursor: pointer;
+                transition: background var(--duration-fast) var(--ease-out);
+            }
+            .token-status:hover {
+                background: rgba(255,255,255,0.2);
+            }
+            .token-indicator {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--color-grey-500);
+            }
+            .token-indicator.valid {
+                background: var(--color-success);
+                box-shadow: 0 0 8px var(--color-success);
+            }
+            .token-indicator.expired {
+                background: var(--color-error);
+                box-shadow: 0 0 8px var(--color-error);
+            }
+            .token-indicator.warning {
+                background: var(--color-warning);
+                box-shadow: 0 0 8px var(--color-warning);
+            }
+
+            /* Modal Styles */
+            .modal {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.7);
+                z-index: 1050;
+                align-items: center;
+                justify-content: center;
+            }
+            .modal.active {
+                display: flex;
+            }
+            .modal-content {
+                background: linear-gradient(135deg, rgba(0, 64, 64, 0.95) 0%, rgba(0, 40, 40, 0.98) 100%);
+                border-radius: var(--radius-xl);
+                max-width: 450px;
+                width: 90%;
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: var(--spacing-4) var(--spacing-5);
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+            .modal-header h3 {
+                margin: 0;
+                color: white;
+            }
+            .modal-body {
+                padding: var(--spacing-5);
+                color: white;
+            }
+            .modal-footer {
+                padding: var(--spacing-4) var(--spacing-5);
+                border-top: 1px solid rgba(255,255,255,0.1);
+                display: flex;
+                justify-content: flex-end;
+                gap: var(--spacing-3);
+            }
+            .close-btn {
+                background: none;
+                border: none;
+                font-size: 1.5rem;
+                cursor: pointer;
+                color: white;
+                opacity: 0.7;
+            }
+            .close-btn:hover {
+                opacity: 1;
+            }
+            .btn {
+                padding: var(--spacing-2) var(--spacing-4);
+                border-radius: var(--radius-lg);
+                border: none;
+                cursor: pointer;
+                font-size: var(--font-size-sm);
+                font-weight: var(--font-weight-medium);
+                transition: all var(--duration-fast) var(--ease-out);
+            }
+            .btn-primary {
+                background: var(--color-primary);
+                color: white;
+            }
+            .btn-primary:hover {
+                background: var(--color-primary-dark);
+            }
+            .btn-secondary {
+                background: rgba(255,255,255,0.15);
+                color: white;
+            }
+            .btn-secondary:hover {
+                background: rgba(255,255,255,0.25);
+            }
+
             /* Container */
             .container {
                 max-width: 1200px;
@@ -1953,7 +2224,32 @@ def index():
                     <p>Explore and test API endpoints</p>
                     <span class="base-url">{{ base_url }}</span>
                 </div>
-                <a href="/prompts-admin" class="header-link">Prompts Administration</a>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <div id="token-status" class="token-status" onclick="showTokenModal()">
+                        <span class="token-indicator" id="token-indicator"></span>
+                        <span id="token-text">Checking...</span>
+                    </div>
+                    <a href="/prompts-admin" class="header-link">Prompts Administration</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token Status Modal -->
+        <div id="token-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Authentication Token Status</h3>
+                    <button class="close-btn" onclick="closeTokenModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="token-details">
+                        <p>Loading token status...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeTokenModal()">Close</button>
+                    <button class="btn btn-primary" onclick="refreshToken()">Refresh Token</button>
+                </div>
             </div>
         </div>
 
@@ -2023,6 +2319,104 @@ def index():
         </div>
 
         <script>
+            // Token status functions
+            document.addEventListener('DOMContentLoaded', () => {
+                checkTokenStatus();
+                setInterval(checkTokenStatus, 60000);
+            });
+
+            async function checkTokenStatus() {
+                try {
+                    const res = await fetch('/api/token/status');
+                    const status = await res.json();
+                    updateTokenIndicator(status);
+                } catch (e) {
+                    updateTokenIndicator({ valid: false, message: 'Unable to check token status' });
+                }
+            }
+
+            function updateTokenIndicator(status) {
+                const indicator = document.getElementById('token-indicator');
+                const text = document.getElementById('token-text');
+
+                if (!status.has_token) {
+                    indicator.className = 'token-indicator';
+                    text.textContent = 'No Token';
+                } else if (status.valid) {
+                    indicator.className = 'token-indicator valid';
+                    const mins = Math.floor(status.time_remaining_seconds / 60);
+                    text.textContent = mins > 60 ? `Valid (${Math.floor(mins/60)}h ${mins%60}m)` : `Valid (${mins}m)`;
+                } else {
+                    indicator.className = 'token-indicator expired';
+                    text.textContent = 'Expired';
+                }
+            }
+
+            function showTokenModal() {
+                document.getElementById('token-modal').classList.add('active');
+                loadTokenDetails();
+            }
+
+            function closeTokenModal() {
+                document.getElementById('token-modal').classList.remove('active');
+            }
+
+            async function loadTokenDetails() {
+                const detailsDiv = document.getElementById('token-details');
+                try {
+                    const res = await fetch('/api/token/status');
+                    const status = await res.json();
+
+                    let html = '<div style="line-height: 1.8;">';
+                    html += `<p><strong>Status:</strong> <span style="color: ${status.valid ? 'var(--color-success)' : 'var(--color-error)'};">${status.valid ? 'Valid' : 'Invalid/Expired'}</span></p>`;
+                    html += `<p><strong>Has Token:</strong> ${status.has_token ? 'Yes' : 'No'}</p>`;
+
+                    if (status.has_token && status.obtained_at) {
+                        const obtained = new Date(status.obtained_at * 1000);
+                        const expires = new Date(status.expires_at * 1000);
+                        html += `<p><strong>Obtained At:</strong> ${obtained.toLocaleString()}</p>`;
+                        html += `<p><strong>Expires At:</strong> ${expires.toLocaleString()}</p>`;
+                        html += `<p><strong>Time Remaining:</strong> ${formatTimeRemaining(status.time_remaining_seconds)}</p>`;
+                    }
+
+                    html += `<p><strong>Message:</strong> ${status.message}</p>`;
+                    html += '</div>';
+                    detailsDiv.innerHTML = html;
+                } catch (e) {
+                    detailsDiv.innerHTML = '<p style="color: var(--color-error);">Failed to load token status</p>';
+                }
+            }
+
+            function formatTimeRemaining(seconds) {
+                if (seconds <= 0) return 'Expired';
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+                if (mins > 0) return `${mins}m ${secs}s`;
+                return `${secs}s`;
+            }
+
+            async function refreshToken() {
+                const detailsDiv = document.getElementById('token-details');
+                detailsDiv.innerHTML = '<p>Refreshing token...</p>';
+
+                try {
+                    const res = await fetch('/api/token/refresh', { method: 'POST' });
+                    const result = await res.json();
+
+                    if (result.success) {
+                        detailsDiv.innerHTML = '<p style="color: var(--color-success);">Token refreshed successfully!</p>';
+                        checkTokenStatus();
+                        setTimeout(loadTokenDetails, 1000);
+                    } else {
+                        detailsDiv.innerHTML = `<p style="color: var(--color-error);">Failed to refresh token: ${result.message}</p>`;
+                    }
+                } catch (e) {
+                    detailsDiv.innerHTML = '<p style="color: var(--color-error);">Error refreshing token</p>';
+                }
+            }
+
             function toggleDetails(header) {
                 const card = header.closest('.endpoint-card');
                 const details = card.querySelector('.details');
@@ -2272,6 +2666,30 @@ def api_download_prompt(prompt_id):
             return jsonify({'url': download_url})
 
     return jsonify({'error': 'Failed to get download link', 'details': result}), 500
+
+# --- TOKEN MANAGEMENT ROUTES ---
+
+@app.route('/api/token/status', methods=['GET'])
+def api_token_status():
+    """Get current authentication token status"""
+    status = api_client.get_token_status()
+    return jsonify(status)
+
+@app.route('/api/token/refresh', methods=['POST'])
+def api_token_refresh():
+    """Force refresh the authentication token"""
+    success = api_client.refresh_token()
+    if success:
+        status = api_client.get_token_status()
+        return jsonify({
+            'success': True,
+            'message': 'Token refreshed successfully',
+            'status': status
+        })
+    return jsonify({
+        'success': False,
+        'message': 'Failed to refresh token'
+    }), 500
 
 if __name__ == '__main__':
     # Ensure credentials are present

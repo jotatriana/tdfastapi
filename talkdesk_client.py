@@ -10,6 +10,7 @@ import yaml
 import requests
 import base64
 import re
+import time
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -48,6 +49,8 @@ class TalkdeskGenericClient:
         self.spec = self._load_spec()
         self.base_url = self._get_base_url()
         self.token = None
+        self.token_expires_at = None
+        self.token_obtained_at = None
 
     def _load_spec(self):
         try:
@@ -92,13 +95,61 @@ class TalkdeskGenericClient:
                 print(f"Response: {response.text}")
                 return False
 
-            self.token = response.json().get('access_token')
-            print("Authentication Successful!")
+            token_data = response.json()
+            self.token = token_data.get('access_token')
+            self.token_obtained_at = time.time()
+            # expires_in is typically in seconds, default to 3600 (1 hour) if not provided
+            expires_in = token_data.get('expires_in', 3600)
+            self.token_expires_at = self.token_obtained_at + expires_in
+            print(f"Authentication Successful! Token expires in {expires_in} seconds")
             return True
 
         except Exception as e:
             print(f"Auth Error: {e}")
             return False
+
+    def is_token_valid(self):
+        """Check if the current token exists and is not expired."""
+        if not self.token or not self.token_expires_at:
+            return False
+        # Add 60 second buffer to refresh before actual expiration
+        return time.time() < (self.token_expires_at - 60)
+
+    def get_token_status(self):
+        """Get detailed token status information."""
+        if not self.token:
+            return {
+                'valid': False,
+                'has_token': False,
+                'message': 'No token available'
+            }
+
+        current_time = time.time()
+        if not self.token_expires_at:
+            return {
+                'valid': False,
+                'has_token': True,
+                'message': 'Token exists but expiration time unknown'
+            }
+
+        time_remaining = self.token_expires_at - current_time
+        is_valid = time_remaining > 60  # 60 second buffer
+
+        return {
+            'valid': is_valid,
+            'has_token': True,
+            'obtained_at': self.token_obtained_at,
+            'expires_at': self.token_expires_at,
+            'time_remaining_seconds': max(0, int(time_remaining)),
+            'message': 'Token is valid' if is_valid else 'Token expired or expiring soon'
+        }
+
+    def refresh_token(self):
+        """Force refresh the authentication token."""
+        self.token = None
+        self.token_expires_at = None
+        self.token_obtained_at = None
+        return self.authenticate()
 
     def get_tags(self):
         """Extract all unique tags from the OpenAPI spec."""
@@ -138,9 +189,11 @@ class TalkdeskGenericClient:
 
     def execute_request(self, method, path, body=None):
         """Execute an API request with automatic authentication."""
-        if '/oauth/token' not in path and not self.token:
-            if not self.authenticate():
-                return {'error': 'Authentication failed'}
+        if '/oauth/token' not in path:
+            if not self.is_token_valid():
+                print("Token missing or expired, re-authenticating...")
+                if not self.authenticate():
+                    return {'error': 'Authentication failed'}
 
         # Dynamic Base URL Selection
         current_base = "https://api.talkdeskapp.com"
