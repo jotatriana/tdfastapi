@@ -189,16 +189,21 @@ class TalkdeskGenericClient:
 
     def execute_request(self, method, path, body=None):
         """Execute an API request with automatic authentication."""
-        if '/oauth/token' not in path:
+        is_oauth_path = '/oauth/' in path
+
+        if not is_oauth_path:
             if not self.is_token_valid():
                 print("Token missing or expired, re-authenticating...")
                 if not self.authenticate():
                     return {'error': 'Authentication failed'}
 
         # Dynamic Base URL Selection
-        current_base = "https://api.talkdeskapp.com"
-        if '/oauth/token' in path:
+        # OAuth endpoints (/oauth/token, /oauth/authorize) use talkdeskid.com
+        # All other API endpoints use api.talkdeskapp.com
+        if is_oauth_path:
             current_base = AUTH_HOST
+        else:
+            current_base = "https://api.talkdeskapp.com"
 
         base = current_base.rstrip('/')
         endpoint = path.lstrip('/')
@@ -211,7 +216,7 @@ class TalkdeskGenericClient:
             'Content-Type': 'application/json'
         }
 
-        if '/oauth/token' not in path:
+        if not is_oauth_path:
             headers['Authorization'] = f'Bearer {self.token}'
 
         try:
