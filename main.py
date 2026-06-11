@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import hmac
+import logging
 import os
 import requests
 from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
@@ -58,6 +59,9 @@ _LOGIN_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+logger = logging.getLogger(__name__)
+
+
 @app.before_request
 def _require_login():
     if request.endpoint in ('login', 'logout', None):
@@ -65,6 +69,10 @@ def _require_login():
     if not _APP_PASSWORD:
         return
     if not session.get('authenticated'):
+        logger.warning(
+            "Access denied: unauthenticated request to %s %s from %s",
+            request.method, request.path, request.remote_addr,
+        )
         if request.is_json or request.path.startswith('/api/') or request.path == '/execute':
             return jsonify({'error': 'Unauthorized'}), 401
         return redirect(url_for('login'))
@@ -2790,9 +2798,12 @@ def api_token_refresh():
     }), 500
 
 if __name__ == '__main__':
-    # Ensure credentials are present
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    )
     if 'YOUR_CLIENT_ID' in CLIENT_ID:
-        print("WARNING: Please set TALKDESK_CLIENT_ID and TALKDESK_CLIENT_SECRET environment variables.")
+        logger.warning("TALKDESK_CLIENT_ID and TALKDESK_CLIENT_SECRET are not set")
     
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
     host = os.getenv('FLASK_HOST', '127.0.0.1')

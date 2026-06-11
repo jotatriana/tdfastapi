@@ -5,6 +5,7 @@ This module provides reusable API client classes for interacting with the Talkde
 It can be used by both the Flask web application and CLI scripts.
 """
 
+import logging
 import os
 import yaml
 import requests
@@ -12,6 +13,8 @@ import base64
 import re
 import time
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -57,7 +60,7 @@ class TalkdeskGenericClient:
             with open(self.openapi_path, 'r') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            print(f"Error loading YAML: {e}")
+            logger.error("Error loading OpenAPI spec: %s", e)
             return {}
 
     def _get_base_url(self):
@@ -85,13 +88,12 @@ class TalkdeskGenericClient:
             'scope': SCOPES
         }
 
-        print(f"Authenticating against: {auth_url}")
+        logger.debug("Authenticating against: %s", auth_url)
         try:
             response = requests.post(auth_url, headers=headers, data=data)
 
             if response.status_code != 200:
-                print(f"Auth Failed: {response.status_code}")
-                print(f"Response: {response.text}")
+                logger.warning("Auth failed: HTTP %s", response.status_code)
                 return False
 
             token_data = response.json()
@@ -100,11 +102,11 @@ class TalkdeskGenericClient:
             # expires_in is typically in seconds, default to 3600 (1 hour) if not provided
             expires_in = token_data.get('expires_in', 3600)
             self.token_expires_at = self.token_obtained_at + expires_in
-            print(f"Authentication Successful! Token expires in {expires_in} seconds")
+            logger.info("Authentication successful. Token expires in %s seconds", expires_in)
             return True
 
         except Exception as e:
-            print(f"Auth Error: {e}")
+            logger.error("Auth error: %s", e)
             return False
 
     def is_token_valid(self):
@@ -192,7 +194,7 @@ class TalkdeskGenericClient:
 
         if not is_oauth_path:
             if not self.is_token_valid():
-                print("Token missing or expired, re-authenticating...")
+                logger.debug("Token missing or expired, re-authenticating...")
                 if not self.authenticate():
                     return {'error': 'Authentication failed'}
 
@@ -208,7 +210,7 @@ class TalkdeskGenericClient:
         endpoint = path.lstrip('/')
         url = f"{base}/{endpoint}"
 
-        print(f"Executing {method} request to: {url}")
+        logger.debug("Executing %s %s", method, url)
 
         headers = {
             'Accept': 'application/json',
@@ -241,7 +243,7 @@ class TalkdeskGenericClient:
                 'data': data
             }
         except Exception as e:
-            print(f"Request Error: {e}")
+            logger.error("Request error: %s", e)
             return {'error': str(e)}
 
 
