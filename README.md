@@ -26,7 +26,10 @@ cd tdfastapi
 uv venv --python 3.12
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
+# Install dependencies from the lockfile (recommended)
+uv sync
+
+# Or install manually
 pip install flask flask-limiter python-dotenv pyyaml requests werkzeug urllib3
 ```
 
@@ -154,9 +157,10 @@ tdfastapi/
 ├── talkdesk_client.py     # Reusable API client classes
 ├── bulk_upload.py         # CLI bulk upload script
 ├── openapi.yaml           # Talkdesk OpenAPI specification
+├── uv.lock                # Pinned dependency lockfile
+├── pyproject.toml         # Project metadata and dependencies
 ├── .env                   # Environment variables (not in git)
 ├── .env.sample            # Environment variable template
-├── pyproject.toml         # Project metadata and dependencies
 ├── CLAUDE.md              # Development documentation
 └── README.md              # This file
 ```
@@ -197,7 +201,7 @@ The application has been hardened against the OWASP Top 10 (2025):
 | **Security headers** | Every response includes `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, and `Content-Security-Policy` |
 | **XSS prevention** | All user-controlled strings inserted into `innerHTML` are passed through `escapeHtml()` |
 | **Debug mode** | Controlled via `FLASK_DEBUG` env var; defaults to `false` |
-| **Dependencies** | Pinned to patched versions; run `pip-audit` to check for new CVEs |
+| **Dependencies** | Pinned in `uv.lock` for reproducible installs; run `pip-audit` to check for new CVEs |
 
 > **Note:** Set `SESSION_COOKIE_SECURE=True` in `app.config` when serving over HTTPS.
 
