@@ -27,7 +27,7 @@ uv venv --python 3.12
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-pip install flask python-dotenv pyyaml requests werkzeug urllib3
+pip install flask flask-limiter python-dotenv pyyaml requests werkzeug urllib3
 ```
 
 ### Configuration
@@ -183,6 +183,23 @@ tdfastapi/
 |--------|----------|-------------|
 | GET | `/api/token/status` | Check OAuth token validity |
 | POST | `/api/token/refresh` | Force token refresh |
+
+## Security
+
+The application has been hardened against the OWASP Top 10 (2025):
+
+| Control | Detail |
+|---------|--------|
+| **Authentication** | All routes gated by `APP_PASSWORD` session login; unauthenticated API calls return `401` |
+| **Session cookies** | `HttpOnly`, `SameSite=Lax` — inaccessible to JS and blocked from cross-site requests |
+| **Rate limiting** | Per-IP limits via `flask-limiter`: `/login` 10/min, `/execute` 60/min, `/api/prompts/upload` 30/min, `/api/token/refresh` 5/min |
+| **Upload size** | 10 MB hard limit enforced server-side (`MAX_CONTENT_LENGTH`) |
+| **Security headers** | Every response includes `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, and `Content-Security-Policy` |
+| **XSS prevention** | All user-controlled strings inserted into `innerHTML` are passed through `escapeHtml()` |
+| **Debug mode** | Controlled via `FLASK_DEBUG` env var; defaults to `false` |
+| **Dependencies** | Pinned to patched versions; run `pip-audit` to check for new CVEs |
+
+> **Note:** Set `SESSION_COOKIE_SECURE=True` in `app.config` when serving over HTTPS.
 
 ## Development
 
