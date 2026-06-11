@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
+import hmac
 import os
 import requests
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
 
 # Import shared client classes
 from talkdesk_client import TalkdeskGenericClient, PromptsManager, CLIENT_ID, CLIENT_SECRET, extract_hal_link
@@ -9,6 +10,72 @@ from talkdesk_client import TalkdeskGenericClient, PromptsManager, CLIENT_ID, CL
 load_dotenv()
 
 app = Flask(__name__)
+
+# --- SECURITY ---
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB server-side upload limit
+_APP_PASSWORD = os.getenv('APP_PASSWORD', '')
+
+_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Talkdesk Tool</title>
+    <style>
+        body{font-family:system-ui,sans-serif;background:#001a1a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+        .card{background:rgba(0,64,64,.6);border:1px solid rgba(0,180,180,.3);border-radius:12px;padding:2rem;width:360px;backdrop-filter:blur(20px)}
+        h1{font-size:1.25rem;margin-bottom:1.5rem;color:#00B4B4}
+        label{display:block;font-size:.875rem;margin-bottom:.25rem;color:rgba(255,255,255,.7)}
+        input{width:100%;box-sizing:border-box;padding:.625rem .75rem;border:1px solid rgba(255,255,255,.2);border-radius:6px;background:rgba(255,255,255,.1);color:#fff;font-size:.875rem;margin-bottom:1rem}
+        button{width:100%;padding:.625rem;background:#006666;border:none;border-radius:6px;color:#fff;font-size:.875rem;font-weight:600;cursor:pointer}
+        button:hover{background:#008080}
+        .error{background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:.5rem .75rem;font-size:.875rem;color:#f87171;margin-bottom:1rem}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>&#128274; Talkdesk Tool</h1>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+            <button type="submit">Sign in</button>
+        </form>
+    </div>
+</body>
+</html>"""
+
+
+@app.before_request
+def _require_login():
+    if request.endpoint in ('login', 'logout', None):
+        return
+    if not _APP_PASSWORD:
+        return
+    if not session.get('authenticated'):
+        if request.is_json or request.path.startswith('/api/') or request.path == '/execute':
+            return jsonify({'error': 'Unauthorized'}), 401
+        return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        submitted = request.form.get('password', '')
+        if _APP_PASSWORD and hmac.compare_digest(submitted, _APP_PASSWORD):
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        error = 'Incorrect password'
+    return render_template_string(_LOGIN_HTML, error=error)
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
 
 # --- CONFIGURATION ---
 OPENAPI_FILE = 'openapi.yaml'
@@ -2696,4 +2763,7 @@ if __name__ == '__main__':
     if 'YOUR_CLIENT_ID' in CLIENT_ID:
         print("WARNING: Please set TALKDESK_CLIENT_ID and TALKDESK_CLIENT_SECRET environment variables.")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    host = os.getenv('FLASK_HOST', '127.0.0.1')
+    port = int(os.getenv('FLASK_PORT', '5000'))
+    app.run(debug=debug, host=host, port=port)
