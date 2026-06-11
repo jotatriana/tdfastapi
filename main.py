@@ -3,6 +3,8 @@ import hmac
 import os
 import requests
 from flask import Flask, abort, jsonify, redirect, render_template_string, request, session, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # Import shared client classes
 from talkdesk_client import TalkdeskGenericClient, PromptsManager, CLIENT_ID, CLIENT_SECRET, extract_hal_link
@@ -17,6 +19,13 @@ app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB server-side upload 
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 _APP_PASSWORD = os.getenv('APP_PASSWORD', '')
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri='memory://',
+)
 
 _LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -62,6 +71,7 @@ def _require_login():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit('10/minute')
 def login():
     error = None
     if request.method == 'POST':
@@ -2588,6 +2598,7 @@ def index():
     return render_template_string(html, endpoints=endpoints, base_url=api_client.base_url, tags=tags)
 
 @app.route('/execute', methods=['POST'])
+@limiter.limit('60/minute')
 def execute():
     req_data = request.json
     method = req_data.get('method')
@@ -2673,6 +2684,7 @@ def api_bulk_operation():
     return jsonify(result)
 
 @app.route('/api/prompts/upload', methods=['POST'])
+@limiter.limit('30/minute')
 def api_upload_prompt():
     """
     Handle prompt file upload workflow:
@@ -2761,6 +2773,7 @@ def api_token_status():
     return jsonify(status)
 
 @app.route('/api/token/refresh', methods=['POST'])
+@limiter.limit('5/minute')
 def api_token_refresh():
     """Force refresh the authentication token"""
     success = api_client.refresh_token()

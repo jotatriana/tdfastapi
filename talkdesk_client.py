@@ -232,7 +232,7 @@ class TalkdeskGenericClient:
 
             try:
                 data = response.json()
-            except:
+            except (ValueError, requests.exceptions.JSONDecodeError):
                 data = response.text
 
             return {
