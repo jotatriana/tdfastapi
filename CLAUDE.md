@@ -16,7 +16,7 @@ The application reads an OpenAPI specification file (`openapi.yaml`) and provide
 ### Core Components
 
 **Shared Client Module** (`talkdesk_client.py`)
-Reusable API client classes that can be imported by both the Flask app and CLI scripts.
+Reusable API client classes that can be imported by both the Flask app and CLI scripts. Uses the stdlib `logging` module — no `print()` calls.
 
 **TalkdeskGenericClient** (`talkdesk_client.py`)
 - OpenAPI-driven generic API client
@@ -35,7 +35,7 @@ Reusable API client classes that can be imported by both the Flask app and CLI s
 - Supports bulk operations and usage tracking
 - `upload_prompt_file()` method for file-based uploads (used by CLI)
 
-**Flask Web Application** (`app.py`)
+**Flask Web Application** (`main.py`)
 - **API Explorer** (`/`) - Generic endpoint testing interface with:
   - Auto-discovery of endpoints from OpenAPI spec
   - Tag-based filtering and path/summary search
@@ -61,11 +61,33 @@ Reusable API client classes that can be imported by both the Flask app and CLI s
 
 ### Authentication Flow
 
+#### App Login (main.py)
+
+All routes are gated by `_require_login()` via `@app.before_request`. When `APP_PASSWORD` is set:
+- Unauthenticated browser requests redirect to `/login`
+- Unauthenticated API/AJAX requests return `401 Unauthorized`
+- Successful login sets `session['authenticated'] = True`
+- Passwords are compared with `hmac.compare_digest()` to prevent timing attacks
+- If `APP_PASSWORD` is not set, the gate is inactive (local dev convenience)
+
+#### Talkdesk OAuth (talkdesk_client.py)
+
 The client uses OAuth2 client credentials grant:
 1. Base64-encodes `CLIENT_ID:CLIENT_SECRET`
-2. POSTs to `https://{account_name}.talkdeskid.com/oauth/token` with Basic auth (account name from `TALKDESK_ACCOUNT_NAME` env var)
-3. Caches access token for subsequent API requests
-4. Auto-authenticates before any API call (except auth endpoint itself)
+2. POSTs to `https://{account_name}.talkdeskid.com/oauth/token` with Basic auth
+3. Caches access token and expiry for subsequent API requests
+4. Auto-authenticates (and refreshes when expired) before any API call
+
+### Security Controls
+
+All hardening was done against the OWASP Top 10 (2025). Key implementation details:
+
+- **Session cookies**: `SESSION_COOKIE_HTTPONLY = True`, `SESSION_COOKIE_SAMESITE = 'Lax'` — set in `main.py` app config. Add `SESSION_COOKIE_SECURE = True` when serving over HTTPS.
+- **Rate limiting**: `flask-limiter` with in-memory storage; limits applied per-IP via `get_remote_address`. Decorated directly on route functions — `/login` (10/min), `/execute` (60/min), `/api/prompts/upload` (30/min), `/api/token/refresh` (5/min).
+- **Upload size**: `MAX_CONTENT_LENGTH = 10 * 1024 * 1024` enforced server-side; Flask returns `413` automatically.
+- **Security headers**: `@app.after_request` hook in `main.py` sets `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, and `Content-Security-Policy` on every response.
+- **XSS prevention**: All user-controlled values inserted into `innerHTML` are wrapped with the `escapeHtml()` JS helper defined in each page.
+- **Debug mode**: Controlled via `FLASK_DEBUG` env var (defaults `false`). Never hardcode `debug=True`.
 
 ### Important Implementation Details
 
@@ -73,6 +95,7 @@ The client uses OAuth2 client credentials grant:
 - **Path Parameter Substitution**: Frontend JavaScript replaces `{param}` placeholders with user input before sending to backend.
 - **OpenAPI Dependency**: The app reads `openapi.yaml` in the project root containing the Talkdesk API OpenAPI specification.
 - **Shared Module**: API client classes are in `talkdesk_client.py` for reuse by both web app and CLI tools.
+- **Logging**: Use `logging.getLogger(__name__)` in any new module. Never use `print()` for diagnostics. Access-control denials are logged at `WARNING` with IP, method, and path.
 
 ### UI/CSS Implementation Notes
 
@@ -88,52 +111,81 @@ The application uses a custom design system with CSS variables for theming. Key 
 ### Environment Variables
 
 Set these in a `.env` file (already gitignored):
+
+**Talkdesk credentials (required)**
 - `TALKDESK_CLIENT_ID` - Your Talkdesk OAuth client ID
 - `TALKDESK_CLIENT_SECRET` - Your Talkdesk OAuth client secret
 - `TALKDESK_ACCOUNT_NAME` - Your Talkdesk account name (subdomain prefix, e.g., `mycompany` for `mycompany.talkdeskid.com`)
 - `TALKDESK_SCOPES` - OAuth scopes (default: `account:read users:read`)
 
+**App security (required when accessible beyond localhost)**
+- `APP_PASSWORD` - Password protecting all routes via the login page
+- `FLASK_SECRET_KEY` - Random 32+ character string used to sign session cookies
+
+**Server settings (optional)**
+- `FLASK_DEBUG` - Set to `true` to enable the Werkzeug debugger (default: `false`)
+- `FLASK_HOST` - Bind address (default: `127.0.0.1`)
+- `FLASK_PORT` - Port (default: `5000`)
+
 ### Python Version
 
-This project uses Python 3.9 (see `.python-version`).
+This project uses Python 3.12 (see `.python-version`).
 
 ## Development Commands
 
 ### Setting Up the Virtual Environment
 
-Create and activate the virtual environment:
 ```bash
-uv venv .venv
+uv venv --python 3.12
 source .venv/bin/activate
 ```
 
 ### Installing Dependencies
 
-Install required packages:
 ```bash
-pip install flask python-dotenv pyyaml requests
+pip install flask flask-limiter python-dotenv pyyaml requests werkzeug urllib3
 ```
 
-Required dependencies:
-- flask
-- python-dotenv
-- pyyaml
-- requests
+Or use the lockfile for a reproducible install:
+```bash
+uv sync
+```
+
+Required dependencies (see `pyproject.toml` for pinned versions):
+- `flask` — web framework
+- `flask-limiter` — per-IP rate limiting
+- `python-dotenv` — `.env` file loading
+- `pyyaml` — OpenAPI spec parsing
+- `requests` — outbound HTTP to Talkdesk API
+- `werkzeug` — WSGI utilities (Flask dependency, pinned for CVE fixes)
+- `urllib3` — HTTP transport (transitive, pinned for CVE fixes)
+
+### Checking for Vulnerabilities
+
+```bash
+pip install pip-audit
+pip-audit
+```
 
 ### Running the Application
 
 ```bash
 source .venv/bin/activate
-python app.py
+python main.py
 ```
 
 The Flask development server will start on `http://localhost:5000`.
 
 ## Application Routes
 
+### Authentication
+- `GET /login` - Login page (shown when `APP_PASSWORD` is set)
+- `POST /login` - Submit password (rate-limited: 10/min per IP)
+- `GET /logout` - Clear session and redirect to login
+
 ### API Explorer
 - `GET /` - Main UI displaying all discovered API endpoints from OpenAPI spec
-- `POST /execute` - Backend proxy that executes API requests with authentication
+- `POST /execute` - Backend proxy that executes API requests with authentication (rate-limited: 60/min)
 
 ### Prompts Administration
 - `GET /prompts-admin` - Prompts management interface with upload, playback, and bulk operations
@@ -142,20 +194,28 @@ The Flask development server will start on `http://localhost:5000`.
 - `GET /api/prompts/{id}` - Get prompt by ID
 - `PATCH /api/prompts/{id}` - Update prompt metadata
 - `DELETE /api/prompts/{id}` - Delete prompt
-- `POST /api/prompts/upload` - Upload audio file (MP3/WAV, max 10MB)
+- `POST /api/prompts/upload` - Upload audio file (MP3/WAV, max 10 MB server-enforced; rate-limited: 30/min)
 - `GET /api/prompts/{id}/download` - Get download link
 - `GET /api/prompts/{id}/usage` - Get usage statistics
 - `GET /api/prompts/{id}/flows` - Get associated Studio flows
 - `POST /api/prompts/bulk` - Bulk operations (delete, update)
 
-## Debugging
+### Token Management
+- `GET /api/token/status` - Check OAuth token validity and time remaining
+- `POST /api/token/refresh` - Force token refresh (rate-limited: 5/min)
 
-The application includes debug print statements for:
-- Authentication URL and headers
-- Request execution URLs
-- Auth failures with status codes and response text
+## Logging
 
-To see these, check console output when running `python app.py`.
+The application uses Python's stdlib `logging` module throughout. Log levels:
+
+| Level | Examples |
+|-------|---------|
+| `DEBUG` | Outbound request URLs, token refresh triggers |
+| `INFO` | Successful authentication |
+| `WARNING` | Auth failures, access-control denials (includes IP + path) |
+| `ERROR` | Network errors, exceptions |
+
+`logging.basicConfig` is called at startup in `main.py` with `level=INFO` and a timestamp format. To see `DEBUG` logs set `level=logging.DEBUG` there, or set `FLASK_DEBUG=true`.
 
 ## Bulk Upload
 
