@@ -14,6 +14,8 @@ app = Flask(__name__)
 # --- SECURITY ---
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB server-side upload limit
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 _APP_PASSWORD = os.getenv('APP_PASSWORD', '')
 
 _LOGIN_HTML = """<!DOCTYPE html>
@@ -75,6 +77,22 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; "
+        "script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "media-src 'self' blob: https:;"
+    )
+    return response
 
 
 # --- CONFIGURATION ---
@@ -1149,7 +1167,7 @@ def prompts_admin():
 
                 currentFile = file;
                 const fileInfo = document.getElementById('file-info');
-                fileInfo.innerHTML = `<strong>Selected:</strong> ${file.name} (${formatFileSize(file.size)})`;
+                fileInfo.innerHTML = `<strong>Selected:</strong> ${escapeHtml(file.name)} (${formatFileSize(file.size)})`;
             }
 
             function formatFileSize(bytes) {
@@ -1479,7 +1497,7 @@ def prompts_admin():
                     progressFill.style.width = `${((i) / total) * 100}%`;
 
                     log.innerHTML += `<div style="padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <span style="color: var(--color-warning);">⏳</span> Uploading: ${promptName}...
+                        <span style="color: var(--color-warning);">⏳</span> Uploading: ${escapeHtml(promptName)}...
                     </div>`;
                     log.scrollTop = log.scrollHeight;
 
@@ -1502,15 +1520,15 @@ def prompts_admin():
                         const lastEntry = log.lastElementChild;
                         if (result.success) {
                             successCount++;
-                            lastEntry.innerHTML = `<span style="color: var(--color-success);">✓</span> ${promptName} - uploaded successfully`;
+                            lastEntry.innerHTML = `<span style="color: var(--color-success);">✓</span> ${escapeHtml(promptName)} - uploaded successfully`;
                         } else {
                             failCount++;
-                            lastEntry.innerHTML = `<span style="color: var(--color-error);">✗</span> ${promptName} - ${result.error || 'Upload failed'}`;
+                            lastEntry.innerHTML = `<span style="color: var(--color-error);">✗</span> ${escapeHtml(promptName)} - ${escapeHtml(result.error || 'Upload failed')}`;
                         }
                     } catch (error) {
                         failCount++;
                         const lastEntry = log.lastElementChild;
-                        lastEntry.innerHTML = `<span style="color: var(--color-error);">✗</span> ${promptName} - ${error.message}`;
+                        lastEntry.innerHTML = `<span style="color: var(--color-error);">✗</span> ${escapeHtml(promptName)} - ${escapeHtml(error.message)}`;
                     }
 
                     log.scrollTop = log.scrollHeight;

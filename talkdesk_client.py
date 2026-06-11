@@ -86,7 +86,6 @@ class TalkdeskGenericClient:
         }
 
         print(f"Authenticating against: {auth_url}")
-        print(f"headers: {headers}")
         try:
             response = requests.post(auth_url, headers=headers, data=data)
 
